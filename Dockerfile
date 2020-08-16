@@ -1,2 +1,4 @@
-FROM bempp/notebook
-RUN pip install pandas cython>=0.23
+FROM bempp/base
+RUN pip install --upgrade pip --user
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt --user

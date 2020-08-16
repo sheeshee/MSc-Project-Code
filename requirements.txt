@@ -1,0 +1,2 @@
+pandas
+cython>=0.23
