@@ -14,9 +14,9 @@ class CavityGrid:
     Contains the main grid, in which are nested all
     the cavity boundaries.
     """
-    def __init__(self, *args):
-        self.main = None
-        self.cavities = None
+    def __init__(self, main, cavities):
+        self.main = main
+        self.cavities = cavities
         # either create or load depending on args
 
     def save(self, filename):
