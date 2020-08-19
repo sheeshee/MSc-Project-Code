@@ -1,11 +1,164 @@
 """
 todo
 """
+from collections import namedtuple
+
 import numpy as np
 import matplotlib.pyplot as plt
 
+import bempp.api
 from bempp.api.operators.potential import maxwell as maxwell_potential
 
+
+
+Vector = namedtuple('Vector', ['dirichlet', 'neumann'])
+
+
+def weak_form_plot(solution):
+    """
+    todo
+    """
+    shape = (220, 220)
+    DOMAIN_OP = 'RWG'
+
+    KE = solution.system.wave_numbers[0]
+    KW = solution.system.wave_numbers[1]
+    KI = solution.system.wave_numbers[2]
+    MU = solution.system.mu_numbers[0]
+    print(KE, KW, KI, MU)
+
+    small_domain_0 = solution.system.cavities[0][DOMAIN_OP]
+    small_domain_1 = solution.system.cavities[0][DOMAIN_OP]
+    large_domain_0 = solution.system.main[DOMAIN_OP]
+    large_domain_1 = solution.system.main[DOMAIN_OP]
+
+    # Split between different domains in vector
+    x = solution.coefficients
+    u_cavity = Vector(
+        dirichlet=x[:small_domain_0.global_dof_count],
+        neumann=x[small_domain_0.global_dof_count:small_domain_0.global_dof_count*2]
+    )
+
+    split_point = small_domain_0.global_dof_count*2
+
+    u_scattered = Vector(
+        dirichlet=x[split_point:split_point+large_domain_1.global_dof_count],
+        neumann=x[split_point+large_domain_1.global_dof_count:]
+    )
+
+    # Check
+    def assert_lengths_match(a, b):
+        """
+        Raise Error if lengths of a and b do not match.
+        """
+        if isinstance(a, int):
+            va = a
+        else:
+            va = len(a)
+
+        if isinstance(b, int):
+            vb = b
+        else:
+            vb = len(b)
+
+        assert va == vb, "Lengths must match. Got %i and %i." % (va, vb)
+
+
+    assert_lengths_match(
+        sum([len(z) for z in [
+            u_cavity.neumann, u_cavity.dirichlet,
+            u_scattered.neumann, u_scattered.dirichlet
+        ]]),
+        x
+    )
+
+    assert_lengths_match(*u_cavity)
+    assert_lengths_match(*u_scattered)
+
+
+    u_wall = Vector(
+        solution.system.wave.dirichlet_trace(large_domain_0).coefficients \
+            + u_scattered.dirichlet,
+        solution.system.wave.neumann_trace(large_domain_0).coefficients \
+             + u_scattered.neumann,
+    )
+
+    # Cavity
+    Ntrace_i = bempp.api.GridFunction(
+        small_domain_1, coefficients=u_cavity.neumann)
+    Dtrace_i = bempp.api.GridFunction(
+        small_domain_0, coefficients=u_cavity.dirichlet)
+
+    # Wall
+    Ntrace_w = bempp.api.GridFunction(
+        large_domain_1, coefficients=u_wall.neumann)
+    Dtrace_w = bempp.api.GridFunction(
+        large_domain_0, coefficients=u_wall.dirichlet)
+
+    # Scattered
+    Ntrace = bempp.api.GridFunction(
+        large_domain_1, coefficients=u_scattered.neumann)
+    Dtrace = bempp.api.GridFunction(
+        large_domain_0, coefficients=u_scattered.dirichlet)
+    
+    # get points
+    points, limits, cavity_indexer, wall_indexer, exterior_indexer = get_spaces(shape, 2, 1)
+    print([len(i) for i in [cavity_indexer, wall_indexer, exterior_indexer]])
+
+    # Cavity
+    print('cavity')
+    cavity_points = points[:, cavity_indexer]
+
+    E_potential_op = maxwell_potential.electric_field(
+        small_domain_1, cavity_points, KI)
+    H_potential_op = maxwell_potential.magnetic_field(
+        small_domain_0, cavity_points, KI)
+
+    cavity_field =  H_potential_op * Dtrace_i + E_potential_op * (MU/KI * Ntrace_i)
+
+    # Wall
+    print('wall')
+    wall_points = points[:, wall_indexer]
+
+    # Influence of external boundary
+    E_potential_op_w = maxwell_potential.electric_field(
+        large_domain_1, wall_points, KW)
+    H_potential_op_w = maxwell_potential.magnetic_field(
+        large_domain_0, wall_points, KW)
+
+    # Influence of cavity
+    E_potential_op_i = maxwell_potential.electric_field(
+        small_domain_1, wall_points, KW)
+    H_potential_op_i = maxwell_potential.magnetic_field(
+        small_domain_0, wall_points, KW)
+
+    # Putting them together
+    wall_field = H_potential_op_w * Dtrace_w + E_potential_op_w * (MU/KW * Ntrace_w) \
+        - (H_potential_op_i * Dtrace_i + E_potential_op_i * (MU/KI * Ntrace_i))
+
+    # Scattered
+    print('exterior')
+    exterior_points = points[:, exterior_indexer]
+
+    E_potential_op = maxwell_potential.electric_field(
+        large_domain_1, exterior_points, KE)
+    H_potential_op = maxwell_potential.magnetic_field(
+        large_domain_0, exterior_points, KE)
+
+
+    scattered_field = - H_potential_op * Dtrace - E_potential_op * (MU/KE * Ntrace)
+
+    # plot
+    total_field = np.empty_like(points, dtype='complex128')
+    total_field[:, cavity_indexer] = cavity_field
+    total_field[:, wall_indexer] = wall_field
+    total_field[:, exterior_indexer] = scattered_field + solution.system.wave.incident_field(points[:, exterior_indexer])
+    squared_field = np.sum(np.abs(total_field**2), axis=0)
+    implot(limits, shape, squared_field)
+    plt.show()
+
+
+    
 def strong_form_plot(solution):
     """
     todo
