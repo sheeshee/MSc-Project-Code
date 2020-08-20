@@ -55,10 +55,7 @@ class System:
         self.mu_numbers = mu_numbers
         self.wave = wave
         self.use_strong_form = None
-
-        self.operator = self.assemble_operator()
-        self.rhs      = self.assemble_rhs()
-    
+   
     @abstractmethod
     def get_ops(self, *args):
         pass
@@ -84,6 +81,11 @@ class System:
         """
         todo
         """
+        time_assemble = -time.clock() # start timer
+
+        self.operator = self.assemble_operator()
+        self.rhs      = self.assemble_rhs()
+
         if preconditioner == 'none':
             super_operator = self.operator
             super_rhs = self.rhs
@@ -94,16 +96,17 @@ class System:
         elif preconditioner == 'self':
             super_operator = self.operator * self.operator
             super_rhs = self.operator * self.rhs
+        # elif preconditioner == 'electric-interior':
+        #     pass
         else:
             raise NotImplementedError(
                 "Preconditioner '%s' not supported" % preconditioner)
 
         if hasattr(super_operator, 'strong_form'):
-            time_assemble = -time.clock() # start timer
             super_operator.strong_form(True)
-            time_assemble += time.clock() # stop timer
-        else:
-            time_assemble = 0
+            
+        time_assemble += time.clock() # stop timer
+        
 
         bempp.api.MATVEC_COUNT = 0 # reset the MATVEC counter to 0
         solve_time = -time.clock() # initialise the timer
@@ -121,18 +124,6 @@ class System:
             return Solution(coefficients=sol, info=info, residuals=residuals, system=self)            
         else:
             return Solution(traces=sol, info=info, residuals=residuals, system=self)
-
-    def get_total_memory_size(self):
-        """
-        todo
-        """
-        ops = self.get_ops()
-        memory = 0
-        for op in ops:
-            for i in range(2):
-                for j in range(2):
-                    memory += self.get_as_operator(op[i, j]).memory
-        return int(memory)
     
     @abstractmethod
     def get_diagonal(self):
@@ -357,8 +348,6 @@ class RWGDominantSystem(System):
         return D.weak_form()
         
 
-    
-
 def discretize(grid, *methods_list):
     """
     Returns a named tuple containing the discretised boundaries of the
@@ -472,4 +461,12 @@ class Solution:
         else:
             weak_form_plot(self)
 
-
+    def get_total_memory_size(self):
+        """
+        todo
+        """
+        memory = 0
+        for i in range(4):
+            for j in range(4):
+                memory += self.system.operator[i, j].memory
+        return memory
