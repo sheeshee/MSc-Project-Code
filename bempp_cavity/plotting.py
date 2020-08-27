@@ -158,8 +158,165 @@ def weak_form_plot(solution):
     plt.show()
 
 
-    
 def strong_form_plot(solution):
+    """
+    todo
+    """
+    domains = solution.system.operator.domain_spaces
+    number_of_points = 220
+    shape = (number_of_points, number_of_points)
+    limits = get_limits(solution.system.cavity_grid.main.bounding_box, 0.5)
+    points = get_point_cloud(limits, number_of_points)
+    exterior_indexer, wall_indexer, cavity_indexers = get_indexers(points, solution)
+    
+    wall_dTrace = solution.system.wave.dirichlet_trace(
+        solution.system.operator.domain_spaces[-2]) + solution.traces[-2]
+    wall_nTrace = solution.system.wave.dirichlet_trace(
+        solution.system.operator.domain_spaces[-1]) + solution.traces[-1]
+    
+    cavity_fields = calculate_cavity_fields(solution, points, cavity_indexers, domains)
+    wall_field = calculate_wall_field(solution, points, wall_indexer, domains, wall_dTrace, wall_nTrace)
+    scattered_field = calculate_scattered_field(points, exterior_indexer, domains, solution)
+
+    # plot
+    total_field = np.empty_like(points, dtype='complex128')
+    for indexer, field in zip(cavity_indexers, cavity_fields):
+        total_field[:, indexer] = field
+    total_field[:, wall_indexer] = wall_field
+    total_field[:, exterior_indexer] = scattered_field + solution.system.wave.incident_field(points[:, exterior_indexer])
+    squared_field = np.sum(np.abs(total_field**2), axis=0)
+    implot(limits, shape, squared_field)
+    plt.show()
+
+
+
+def calculate_scattered_field(points, exterior_indexer, domains, solution):
+    """
+    todo
+    """
+    exterior_points = points[:, exterior_indexer] # [:, :, 0]
+    H_pot_ext = maxwell_potential.magnetic_field(
+        domains[-2], exterior_points, solution.system.wave_numbers[0]
+    )
+    E_pot_ext = maxwell_potential.magnetic_field(
+        domains[-1], exterior_points, solution.system.wave_numbers[0]
+    )
+    scattered_field = - H_pot_ext * solution.traces[-2] \
+        - E_pot_ext * (
+            solution.system.mu_numbers[0]/solution.system.wave_numbers[0] * solution.traces[-1]
+        )
+    return scattered_field
+
+
+def calculate_wall_field(solution, points, wall_indexer, domains, wall_dTrace, wall_nTrace):
+    # wall
+    wall_points = points[:, wall_indexer]
+    H_pot_wall = maxwell_potential.magnetic_field(
+        domains[-2], wall_points, solution.system.wave_numbers[1])
+    E_pot_wall = maxwell_potential.electric_field(
+        domains[-1], wall_points, solution.system.wave_numbers[1])
+
+    H_pot_cavities = []
+    E_pot_cavities = []
+    
+    # Influence of cavity
+    for i in range(solution.system.N-1):
+        H_pot_cavities.append(
+            maxwell_potential.magnetic_field(
+                domains[2*i], wall_points, solution.system.wave_numbers[1])
+        )
+        E_pot_cavities.append(
+            maxwell_potential.electric_field(
+                domains[2*i+1], wall_points, solution.system.wave_numbers[1])
+        )
+
+    cavity_contribution = sum([
+        H_pot_cavities[i] * solution.traces[2*i] \
+            + E_pot_cavities[i] * (
+                solution.system.mu_numbers[2+i]/solution.system.wave_numbers[2+i] \
+                    * solution.traces[2*i+1]
+            )
+        for i in range(solution.system.N-1)
+    ])
+    
+    wall_field = H_pot_wall * wall_dTrace + E_pot_wall * (solution.system.mu_numbers[1]/solution.system.wave_numbers[1] \
+        * wall_nTrace) - cavity_contribution
+    return wall_field
+
+
+def calculate_cavity_fields(solution, points, cavity_indexers, domains):
+    # cavities
+    E_pot_cavities = []
+    H_pot_cavities = []
+    # print(cavity_indexers)
+    for i in range(solution.system.N-1):
+        
+        cavity_points = points[:, cavity_indexers[i]] # [:, :, 0]
+        H_pot_cavities.append(
+            maxwell_potential.magnetic_field(
+                domains[2*i], cavity_points, solution.system.wave_numbers[i+2]
+            )
+        )
+        E_pot_cavities.append(
+            maxwell_potential.electric_field(
+                domains[2*i+1], cavity_points, solution.system.wave_numbers[i+2]
+            )
+        )
+    # fields
+    ## cavities
+    cavity_fields = [
+        H_pot_cavities[i] * solution.traces[2*i] \
+            + E_pot_cavities[i] * \
+                (solution.system.mu_numbers[2+i]/solution.system.wave_numbers[2+i] * \
+                    solution.traces[2*i+1])
+        for i, _ in enumerate(solution.system.cavity_grid.cavities)
+    ]
+    return cavity_fields
+
+  
+def show_domains(solution):
+    """
+    todo
+    """
+    number_of_points = 220
+    shape = (number_of_points, number_of_points)
+    limits = get_limits(solution.system.cavity_grid.main.bounding_box, 0.5)
+    points = get_point_cloud(limits, number_of_points)
+    # check if the point is exterior to outer boundary
+    exterior_indexer, wall_indexer, cavity_indexers = get_indexers(points, solution)
+    
+    regions = np.empty_like(points)
+    
+    regions[:, exterior_indexer] = 1
+    regions[:, wall_indexer] = 1.5
+    for indexer in cavity_indexers:
+        regions[:, indexer] = 0
+
+    data = np.sum(np.abs(regions**2), axis=0)
+    implot(limits, shape, data, clim=(0, 20))
+
+
+def get_indexers(points, solution):
+    """
+    todo
+    """
+    # check if the point is exterior to outer boundary
+    exterior_indexer = get_indices(points, solution.system.cavity_grid.main, -1)
+    # check if the point is within any of the cavities
+    cavity_indexers = [
+        get_indices(points, cavity)
+        for cavity in solution.system.cavity_grid.cavities
+    ]
+    # else, conclude the point is in the wall
+    mask = np.ones(len(points.T), np.bool)
+    mask[exterior_indexer] = 0
+    for indexer in cavity_indexers:
+        mask[indexer] = 0
+    wall_indexer = np.arange(len(points.T))[mask]
+    return exterior_indexer, wall_indexer, cavity_indexers
+
+    
+def strong_form_plot_old(solution):
     """
     todo
     """
@@ -230,7 +387,6 @@ def strong_form_plot(solution):
         large_domain_1, exterior_points, KE)
     H_potential_op = maxwell_potential.magnetic_field(
         large_domain_0, exterior_points, KE)
-
 
     scattered_field = - H_potential_op * Dtrace - E_potential_op * (MU/KE * Ntrace)
 
@@ -317,3 +473,59 @@ def get_field(points, selector, field):
     total_field[:] = np.nan
     total_field[:, selector] = field
     return np.sum(np.abs(total_field**2), axis=0)
+
+
+def get_point_cloud(limits, number_of_points):
+    """
+    todo
+    """
+    xmin, xmax, zmin, zmax = limits
+    plot_grid = np.mgrid[
+        xmin:xmax:number_of_points * 1j,
+        0:0:1j, # sectional splice
+        zmin:zmax:number_of_points * 1j
+    ]
+
+    c = 0 # height of intersecting plane
+
+    points = np.vstack((
+        plot_grid[0].ravel(),
+        c * np.ones(plot_grid[0].size),
+        plot_grid[2].ravel()
+    ))
+
+    return points
+
+    
+def get_limits(bounding_box, padding):
+    """
+    todo
+
+    array([[-1.5, -1.5, -1.5],
+            [ 1.5,  1.5,  1.5]])
+    """
+    xmin = bounding_box[0, 0] - padding
+    xmax = bounding_box[1, 0] + padding
+    zmin = bounding_box[0, 2] - padding
+    zmax = bounding_box[1, 2] + padding
+    return xmin, xmax, zmin, zmax
+
+
+def get_indices(points, grid, direction=1):
+    """
+    todo
+    """
+    box = grid.bounding_box
+    if direction == -1:
+    
+        x = (points[0, :] < box[0, 0]) | (box[1, 0] < points[0, :])
+        y = (points[1, :] < box[0, 1]) | (box[1, 1] < points[1, :])
+        z = (points[2, :] < box[0, 2]) | (box[1, 2] < points[2, :])        
+        to_return =  np.argwhere(x | y | z) # must include y as well
+    else:
+        x = (box[0, 0] < points[0, :]) * (points[0, :] < box[1, 0])
+        y = (box[0, 1] < points[1, :]) * (points[1, :] < box[1, 1])
+        z = (box[0, 2] < points[2, :]) * (points[2, :] < box[1, 2])
+        
+        to_return =  np.argwhere(x & y & z) # must include y as well
+    return np.ravel(to_return)

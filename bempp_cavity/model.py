@@ -11,7 +11,7 @@ from bempp.api import assembly, linalg, function_space
 from bempp.api.operators.boundary import maxwell, sparse
 from .login import gmres as login_gmres
 
-from .plotting import strong_form_plot, weak_form_plot
+from .plotting import strong_form_plot, weak_form_plot, show_domains
 
 
 SOLVER_OPTIONS = dict(
@@ -55,23 +55,36 @@ class System:
         self.mu_numbers = mu_numbers
         self.wave = wave
         self.use_strong_form = None
+        self._operators = None
    
-    @abstractmethod
     def get_ops(self, *args):
+        if self._operators is None:
+            self._operators = self._compile_ops()
+        return self._operators
+
+    @property
+    def N(self):
+        return len(self.cavity_grid.cavities) + 1
+
+    @abstractmethod
+    def _compile_ops(self):
         pass
     
     def assemble_operator(self):
         """
         todo
         """
-        Aw_1, A1_1, Aw_1w, Aw_w1, Aw_w, Ae_w = self.get_ops()
+        N = len(self.cavity_grid.cavities) # system size
+        operators = self.get_ops()
 
-        A = assembly.BlockedOperator(2 * 2, 2 * 2)
-        assign_in_place_subblock(A, -(Aw_1 + A1_1), 0, 0)
-        assign_in_place_subblock(A,   Aw_1w,        0, 1)
-        assign_in_place_subblock(A, - Aw_w1,        1, 0)
-        assign_in_place_subblock(A,   Aw_w + Ae_w,  1, 1)
+        A = assembly.BlockedOperator((N+1) * 2, (N+1) * 2)
+        for (row, col), ops_dict in operators.items():
+            ops = list(ops_dict.values())
+            op_sum = sum(ops[1:], ops[0])
+            assign_in_place_subblock(A, op_sum, row, col)
+
         return A
+
     
     @abstractmethod
     def assemble_rhs(self, *args):
@@ -159,47 +172,86 @@ class DefaultSystem(System):
         )
         return sol, solve_info, residuals
 
-    def get_ops(self):
+    def _compile_ops(self):
         """
         todo
         """
-        k = self.wave_numbers
-        small_grid = self.cavity_grid.cavities[0]
-        large_grid = self.cavity_grid.main
-        # small cube
-        A1_1 = maxwell.multitrace_operator(small_grid, k[2])
-        Aw_1 = maxwell.multitrace_operator(small_grid, k[1])
-        # large cube
-        Aw_w = maxwell.multitrace_operator(large_grid, k[1])
-        Ae_w = maxwell.multitrace_operator(large_grid, k[0])
-        # mixed 
-        Aw_1w = maxwell.multitrace_operator(large_grid, k[1], target=small_grid) 
-        Aw_w1 = maxwell.multitrace_operator(small_grid, k[1], target=large_grid) 
+        ke = self.wave_numbers[0]
+        kw = self.wave_numbers[1]
+        ki = self.wave_numbers[2:]
+        cavities = self.cavity_grid.cavities
+        ops = {}
+        def add(i, j, op, key='default'):
+            if (i, j) not in ops:
+                ops[(i, j)] = {key: op}
+            else:
+                if key in ops[(i, j)]:
+                    raise ValueError("Duplicate key value provided in operator construction")
+                else:
+                    ops[(i, j)][key] = op
 
-        return Aw_1, A1_1, Aw_1w, Aw_w1, Aw_w, Ae_w
+        # cavities
+        for row, _ in enumerate(cavities):
+            for col, _ in enumerate(cavities):
+                # print(row, col, cavities)
+                if row == col:
+                    add(
+                        row, col,
+                        -1 * maxwell.multitrace_operator(cavities[row], ki[row])
+                    )
+                    add(
+                        row, col,
+                        -1 * maxwell.multitrace_operator(cavities[row], kw),
+                        key='wall'
+                    )
+                else:
+                    add(
+                        row, col,
+                        -1 * maxwell.multitrace_operator(cavities[col], kw, target=cavities[row])
+                    )
+            # # self to wall
+            add(
+                row, col+1,
+                maxwell.multitrace_operator(self.cavity_grid.main, kw, target=cavities[row])
+            )
+        
+        for col, cavity in enumerate(cavities):
+            add(
+                row+1, col,
+                -1 * maxwell.multitrace_operator(cavity, kw, target=self.cavity_grid.main)
+            )
+        
+        # external boundary
+        add(
+            row+1, col+1,
+            maxwell.multitrace_operator(self.cavity_grid.main, kw),
+            key='wall'
+
+        )
+        add(
+            row+1, col+1,
+            maxwell.multitrace_operator(self.cavity_grid.main, ke),
+            key='exterior'
+        )
+
+        return ops
 
     def assemble_rhs(self):
         """
         todo
         """
+        ops = self.get_ops()
+        rhs = [None] * self.N
+        dTrace = self.wave.dirichlet_trace(self.operator.domain_spaces[-2])
+        nTrace = self.wave.neumann_trace(self.operator.domain_spaces[-1])
         I = sparse.multitrace_identity(self.cavity_grid.main, spaces='maxwell')
 
-        Aw_w = maxwell.multitrace_operator(self.cavity_grid.main, self.wave_numbers[1])
+        for i in range(self.N - 1):
+            rhs[i] = -1 * ops[(i, self.N - 1)]['default'] * [dTrace, nTrace]
+        
+        rhs[self.N - 1] = -1 * (ops[(self.N - 1, self.N - 1)]['wall'] - 0.5 * I) * [dTrace, nTrace]
 
-        Aw_1w = maxwell.multitrace_operator(
-            self.cavity_grid.main, self.wave_numbers[1],
-            target=self.cavity_grid.cavities[0])
-
-        dTrace = self.wave.dirichlet_trace(self.operator.domain_spaces[2])
-        nTrace = self.wave.neumann_trace(self.operator.domain_spaces[3])
-
-        rhs = [
-            - Aw_1w * [dTrace, nTrace],
-            - (Aw_w - 1/2 * I) * [dTrace, nTrace]
-        ]
-
-        rhs = [rhs[0][0], rhs[0][1], rhs[1][0], rhs[1][1]] # flatten
-        return rhs
+        return [a for b in rhs for a in b] # flatten list and return
 
     def get_diagonal(self):
         """
@@ -415,6 +467,7 @@ def assign_in_place_subblock(A, a, i, j):
     """
     bi = 2*i
     bj = 2*j
+    # print(a.domain_spaces, A.domain_spaces)
     A[bi, bj]     = a[0, 0]
     A[bi, bj+1]   = a[0, 1]
     A[bi+1, bj]   = a[1, 0]
@@ -460,6 +513,12 @@ class Solution:
             strong_form_plot(self)
         else:
             weak_form_plot(self)
+    
+    def show_domains(self):
+        """
+        todo
+        """
+        show_domains(self)
 
     def get_total_memory_size(self):
         """
