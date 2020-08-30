@@ -56,6 +56,8 @@ class System:
         self.wave = wave
         self.use_strong_form = None
         self._operators = None
+        self.main = None
+        self.cavities = None
    
     def get_ops(self, *args):
         if self._operators is None:
@@ -65,10 +67,6 @@ class System:
     @property
     def N(self):
         return len(self.cavity_grid.cavities) + 1
-
-    @abstractmethod
-    def _compile_ops(self):
-        pass
     
     def assemble_operator(self):
         """
@@ -150,6 +148,73 @@ class System:
     def _gmres(self, *args):
         pass
 
+    @abstractmethod
+    def multitrace_operator(self, *args, **kwargs):
+        pass
+
+    def _compile_ops(self):
+        """
+        todo
+        """
+        ke = self.wave_numbers[0]
+        kw = self.wave_numbers[1]
+        ki = self.wave_numbers[2:]
+        mu = 1
+        cavities = self.cavities
+        ops = {}
+        def add(i, j, op, key='default'):
+            if (i, j) not in ops:
+                ops[(i, j)] = {key: op}
+            else:
+                if key in ops[(i, j)]:
+                    raise ValueError("Duplicate key value provided in operator construction")
+                else:
+                    ops[(i, j)][key] = op
+
+        # cavities
+        for row, _ in enumerate(cavities):
+            for col, _ in enumerate(cavities):
+                if row == col:
+                    add(
+                        row, col,
+                        -1 * self.multitrace_operator(ki[row], mu, cavities[row])
+                    )
+                    add(
+                        row, col,
+                        -1 * self.multitrace_operator(kw, mu, cavities[row]),
+                        key='wall'
+                    )
+                else:
+                    add(
+                        row, col,
+                        -1 * self.multitrace_operator(kw, mu, cavities[col], target=cavities[row])
+                    ),
+            # # self to wall
+            add(
+                row, col+1,
+                self.multitrace_operator(kw, mu, self.main, target=cavities[row])
+            )
+        
+        for col, cavity in enumerate(cavities):
+            add(
+                row+1, col,
+                -1 * self.multitrace_operator(kw, mu, cavity, target=self.main)
+            )
+        
+        # external boundary
+        add(
+            row+1, col+1,
+            self.multitrace_operator(kw, mu, self.main),
+            key='wall'
+
+        )
+        add(
+            row+1, col+1,
+            self.multitrace_operator(ke, mu, self.main),
+            key='exterior'
+        )
+
+        return ops
 
 class DefaultSystem(System):
     """
@@ -158,6 +223,8 @@ class DefaultSystem(System):
     def __init__(self, *args):
         super(DefaultSystem, self).__init__(*args)
         self.use_strong_form = True
+        self.main = self.cavity_grid.main
+        self.cavities = self.cavity_grid.cavities
     
     def _gmres(self, super_operator, super_rhs, tol):
         """
@@ -172,69 +239,15 @@ class DefaultSystem(System):
         )
         return sol, solve_info, residuals
 
-    def _compile_ops(self):
+    def multitrace_operator(
+            self,
+            k, mu, base, target=None
+        ):
         """
         todo
         """
-        ke = self.wave_numbers[0]
-        kw = self.wave_numbers[1]
-        ki = self.wave_numbers[2:]
-        cavities = self.cavity_grid.cavities
-        ops = {}
-        def add(i, j, op, key='default'):
-            if (i, j) not in ops:
-                ops[(i, j)] = {key: op}
-            else:
-                if key in ops[(i, j)]:
-                    raise ValueError("Duplicate key value provided in operator construction")
-                else:
-                    ops[(i, j)][key] = op
-
-        # cavities
-        for row, _ in enumerate(cavities):
-            for col, _ in enumerate(cavities):
-                # print(row, col, cavities)
-                if row == col:
-                    add(
-                        row, col,
-                        -1 * maxwell.multitrace_operator(cavities[row], ki[row])
-                    )
-                    add(
-                        row, col,
-                        -1 * maxwell.multitrace_operator(cavities[row], kw),
-                        key='wall'
-                    )
-                else:
-                    add(
-                        row, col,
-                        -1 * maxwell.multitrace_operator(cavities[col], kw, target=cavities[row])
-                    )
-            # # self to wall
-            add(
-                row, col+1,
-                maxwell.multitrace_operator(self.cavity_grid.main, kw, target=cavities[row])
-            )
+        return maxwell.multitrace_operator(base, k, target=target)
         
-        for col, cavity in enumerate(cavities):
-            add(
-                row+1, col,
-                -1 * maxwell.multitrace_operator(cavity, kw, target=self.cavity_grid.main)
-            )
-        
-        # external boundary
-        add(
-            row+1, col+1,
-            maxwell.multitrace_operator(self.cavity_grid.main, kw),
-            key='wall'
-
-        )
-        add(
-            row+1, col+1,
-            maxwell.multitrace_operator(self.cavity_grid.main, ke),
-            key='exterior'
-        )
-
-        return ops
 
     def assemble_rhs(self):
         """
@@ -283,31 +296,15 @@ class RWGDominantSystem(System):
             # 'B-SNC'
             # 'RBC'
         ]
+        super(RWGDominantSystem, self).__init__(*args)
         self.main = discretize(args[0].main, *methods)
         self.cavities = [discretize(grid, *methods) for grid in args[0].cavities]
-        super(RWGDominantSystem, self).__init__(*args)
         self.use_strong_form = False
-
-    def get_ops(self):
-        """
-        todo
-        """
-        k = self.wave_numbers
-        mu = self.mu_numbers[0]
-        domain = 'RWG'
-        range_ = 'RWG'
-        dtr = 'SNC'
-        # small cube
-        A1_1 = get_simple_block_op(self.cavities[0], k[2], mu, domain, range_, dtr)
-        Aw_1 = get_simple_block_op(self.cavities[0], k[1], mu, domain, range_, dtr)
-        # large cube
-        Aw_w = get_simple_block_op(self.main, k[1], mu, domain, range_, dtr)
-        Ae_w = get_simple_block_op(self.main, k[0], mu, domain, range_, dtr)
-        # mixed (target, source, k)
-        Aw_1w = get_mixed_block_op(self.cavities[0], self.main, k[1], mu, domain, range_, dtr)
-        Aw_w1 = get_mixed_block_op(self.main, self.cavities[0], k[1], mu, domain, range_, dtr)
-   
-        return Aw_1, A1_1, Aw_1w, Aw_w1, Aw_w, Ae_w
+    
+    def multitrace_operator(self, k, mu, base, target=None):
+        if target is None:
+            target = base
+        return get_simple_block_op(base, target, k, mu)
     
     def get_as_operator(self, op):
         """
@@ -326,35 +323,28 @@ class RWGDominantSystem(System):
         """
         todo
         """
-        DOMAIN_OP = 'RWG'
-        RANGE_OP = 'RWG'
-        DTR_OP = 'SNC'
-        large_cube = self.main
-        small_cube = self.cavities[0]
-        KW = self.wave_numbers[1]
-        MU = self.mu_numbers[0]
+        rhs = [None] * self.N
+        ops = self.get_ops()
+        # large_cube = self.main
+        # small_cube = self.cavities[0]
+        # KW = self.wave_numbers[1]
+        # MU = self.mu_numbers[0]
+        I = self.manually_get_block_identity_op(self.main)
+        u_inc = self.wave.coefficients(self.main['RWG'])
 
-        Aw_1w = get_mixed_block_op(
-            small_cube, large_cube,
-            KW, MU,
-            DOMAIN_OP, RANGE_OP, DTR_OP
-        )
+        for i in range(self.N - 1):
+            rhs[i] = -1 * ops[(i, self.N - 1)]['default'].weak_form() * u_inc
+        
+        rhs[self.N - 1] = -1 * (ops[(self.N - 1, self.N - 1)]['wall'].weak_form() - 0.5 * I.weak_form()) * u_inc
 
-        Aw_w  = get_simple_block_op(
-            large_cube, KW, MU,
-            DOMAIN_OP, RANGE_OP, DTR_OP                       
-        )
 
-        I = self.manually_get_block_identity_op(
-            large_cube, DOMAIN_OP, RANGE_OP, DTR_OP)
+        # pre = [
+        #     - Aw_1w.weak_form() * self.wave.coefficients(large_cube[DOMAIN_OP]),
+        #     - (Aw_w.weak_form() - 1/2 * I.weak_form()) * self.wave.coefficients(large_cube[DOMAIN_OP])
+        # ]
 
-        pre = [
-            - Aw_1w.weak_form() * self.wave.coefficients(large_cube[DOMAIN_OP]),
-            - (Aw_w.weak_form() - 1/2 * I.weak_form()) * self.wave.coefficients(large_cube[DOMAIN_OP])
-        ]
-        # flatten list of lists
-        b1 = [y for x in pre for y in x]
-        return b1
+        # flatten list of lists and return
+        return [y for x in rhs for y in x]
 
     def get_identity_op(self, space, domain, range_, dtr):
         """
@@ -365,11 +355,11 @@ class RWGDominantSystem(System):
             space[domain], space[range_], space[dtr]
         )
     
-    def manually_get_block_identity_op(self, space, domain, range_, dtr):
+    def manually_get_block_identity_op(self, space):
         """
         Create an identity operator matching the given space.
         """
-        i = self.get_identity_op(space, domain, range_, dtr)
+        i = self.get_identity_op(space, 'RWG', 'RWG', 'SNC')
         I = assembly.BlockedOperator(2, 2)
         I[0, 0] = i
         I[1, 1] = i
@@ -426,7 +416,7 @@ def to_block_op(mfie, efie, k, mu):
     return A
 
 
-def get_simple_block_op(space, k, mu, domain, range_, dtr):
+def get_simple_block_op(base, target, k, mu):
     """
     Return a 2x2 block operator defining the block matrix that would
     act on the given grid.
@@ -436,28 +426,28 @@ def get_simple_block_op(space, k, mu, domain, range_, dtr):
     to use.
     """
     efie = maxwell.electric_field(
-        space[domain], space[range_], space[dtr], k,
+        base['RWG'], target['RWG'], target['SNC'], k,
     )
     mfie = maxwell.magnetic_field(
-        space[domain], space[range_], space[dtr], k,
+        base['RWG'], target['RWG'], target['SNC'], k,
     )
     A = to_block_op(mfie, efie, k, mu)
     return A
 
 
-def get_mixed_block_op(target, source, k, mu, domain, range_, dtr):
-    """
-    Return a 2x2 block operator that defines the interferences on
-    `grid_a` by `grid_b`.
-    """
-    efie = maxwell.electric_field(
-        source[domain], target[range_], target[dtr], k
-    )
-    mfie = maxwell.magnetic_field(
-        source[domain], target[range_], target[dtr], k
-    )    
-    A = to_block_op(mfie, efie, k, mu)
-    return A
+# def get_mixed_block_op(target, source, k, mu, domain, range_, dtr):
+#     """
+#     Return a 2x2 block operator that defines the interferences on
+#     `grid_a` by `grid_b`.
+#     """
+#     efie = maxwell.electric_field(
+#         source[domain], target[range_], target[dtr], k
+#     )
+#     mfie = maxwell.magnetic_field(
+#         source[domain], target[range_], target[dtr], k
+#     )    
+#     A = to_block_op(mfie, efie, k, mu)
+#     return A
 
 
 def assign_in_place_subblock(A, a, i, j):
@@ -467,9 +457,8 @@ def assign_in_place_subblock(A, a, i, j):
     """
     bi = 2*i
     bj = 2*j
-    # print(a.domain_spaces, A.domain_spaces)
-    A[bi, bj]     = a[0, 0]
-    A[bi, bj+1]   = a[0, 1]
+    A[bi,   bj]   = a[0, 0]
+    A[bi,   bj+1] = a[0, 1]
     A[bi+1, bj]   = a[1, 0]
     A[bi+1, bj+1] = a[1, 1]
 
