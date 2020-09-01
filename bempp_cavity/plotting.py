@@ -197,11 +197,11 @@ def strong_form_plot(solution):
     plt.show()
 
 
-def setup_plotting(number_of_points, solution):
+def setup_plotting(number_of_points, grid):
     shape = (number_of_points, number_of_points)
-    limits = get_limits(solution.system.cavity_grid.main.bounding_box, 0.5)
+    limits = get_limits(grid.main.bounding_box, 0.5)
     points = get_point_cloud(limits, number_of_points)
-    exterior_indexer, wall_indexer, cavity_indexers = get_indexers(points, solution)
+    exterior_indexer, wall_indexer, cavity_indexers = get_indexers(points, grid)
     return points, cavity_indexers, wall_indexer, exterior_indexer, limits, shape
 
 
@@ -289,12 +289,12 @@ def calculate_cavity_fields(solution, points, cavity_indexers, domains):
     return cavity_fields
 
   
-def show_domains(solution):
+def show_domains(cavity_grid):
     """
     todo
     """
     number_of_points = 220
-    points, cavity_indexers, wall_indexer, exterior_indexer, limits, shape = setup_plotting(number_of_points, solution)
+    points, cavity_indexers, wall_indexer, exterior_indexer, limits, shape = setup_plotting(number_of_points, cavity_grid)
     
     regions = np.empty_like(points)
     
@@ -307,16 +307,16 @@ def show_domains(solution):
     implot(limits, shape, data, clim=(0, 20))
 
 
-def get_indexers(points, solution):
+def get_indexers(points, grid):
     """
     todo
     """
     # check if the point is exterior to outer boundary
-    exterior_indexer = get_indices(points, solution.system.cavity_grid.main, -1)
+    exterior_indexer = get_indices(points, grid.main, -1)
     # check if the point is within any of the cavities
     cavity_indexers = [
         get_indices(points, cavity)
-        for cavity in solution.system.cavity_grid.cavities
+        for cavity in grid.cavities
     ]
     # else, conclude the point is in the wall
     mask = np.ones(len(points.T), np.bool)

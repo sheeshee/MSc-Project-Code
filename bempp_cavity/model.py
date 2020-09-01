@@ -497,7 +497,7 @@ class Solution:
         """
         todo
         """
-        show_domains(self)
+        show_domains(self.system)
 
     def get_total_memory_size(self):
         """
