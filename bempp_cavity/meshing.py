@@ -18,19 +18,3 @@ class CavityGrid:
         self.main = main
         self.cavities = cavities
         # either create or load depending on args
-
-    def save(self, filename):
-        """
-        Pickle it
-        """
-        pass
-
-    def load_from_file(self):
-        """
-        unpickle
-        """
-        pass
-
-    def create(self, main, cavities: list):
-        pass
-

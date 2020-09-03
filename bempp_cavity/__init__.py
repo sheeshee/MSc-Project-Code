@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Main module description
+Main module.
 """
 
 from .meshing import create_grid

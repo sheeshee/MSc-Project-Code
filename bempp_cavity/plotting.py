@@ -1,5 +1,5 @@
 """
-todo
+This file contains the main figure plotting routines for the Solution object.
 """
 from collections import namedtuple
 
@@ -14,12 +14,15 @@ Vector = namedtuple('Vector', ['dirichlet', 'neumann'])
 
 
 def weak_form_plot(solution):
+    """
+    Plot a solution that is derived from weak form.
+    """
     DOMAIN_OP = 'RWG'
     number_of_points = 220
     domains = [cavity[DOMAIN_OP] for cavity in solution.system.cavities] \
         + [solution.system.main[DOMAIN_OP]]
     points, cavity_indexers, wall_indexer, exterior_indexer, limits, shape = setup_plotting(
-        number_of_points, solution)
+        number_of_points, solution.system.cavity_grid)
    
     u_cavities, u_scattered = partition_data(solution, domains)    
     u_wall = Vector(
@@ -49,7 +52,7 @@ def weak_form_plot(solution):
 
 def calculate_scattered_field_weak(solution, points, exterior_indexer, domains, trace_wall):
     """
-    todo
+    Return the value of the scattered field, calculated from the trace data.
     """
     exterior_points = points[:, exterior_indexer]
     H_pot = maxwell_potential.magnetic_field(
@@ -66,7 +69,7 @@ def calculate_scattered_field_weak(solution, points, exterior_indexer, domains, 
 
 def calculate_wall_field_weak(solution, points, wall_indexer, domains, trace_wall, trace_cavities):
     """
-    todo
+    Return the value of the field within the wall, calculated from the trace data.
     """
     # wall
     wall_points = points[:, wall_indexer]
@@ -104,7 +107,7 @@ def calculate_wall_field_weak(solution, points, wall_indexer, domains, trace_wal
 
 def calculate_cavity_fields_weak(solution, points, cavity_indexers, domains, traces):
     """
-    todo
+    Return the value of a cavity field, calculated from the trace data.
     """
     E_pot_cavities = []
     H_pot_cavities = []
@@ -134,7 +137,7 @@ def calculate_cavity_fields_weak(solution, points, cavity_indexers, domains, tra
 
 def partition_data(solution, domains):
     """
-    todo
+    Split the coefficients from a Solution into its respective trace vectors.
     """
     x = solution.coefficients
     u_cavities = []
@@ -158,7 +161,7 @@ def partition_data(solution, domains):
 
 def to_trace(space, u):
     """
-    todo
+    Convert trace data into BEMPP Grid Functions.
     """
     return Vector(
         dirichlet=bempp.api.GridFunction(
@@ -170,12 +173,12 @@ def to_trace(space, u):
 
 def strong_form_plot(solution):
     """
-    todo
+    Plot a solution derived through use of the strong form.
     """
     domains = solution.system.operator.domain_spaces
     number_of_points = 220
     points, cavity_indexers, wall_indexer, exterior_indexer, limits, shape = setup_plotting(
-        number_of_points, solution)
+        number_of_points, solution.system.cavity_grid)
     
     wall_dTrace = solution.system.wave.dirichlet_trace(
         solution.system.operator.domain_spaces[-2]) + solution.traces[-2]
@@ -198,6 +201,9 @@ def strong_form_plot(solution):
 
 
 def setup_plotting(number_of_points, grid):
+    """
+    Get the points and indexers needed to plot the solution.
+    """
     shape = (number_of_points, number_of_points)
     limits = get_limits(grid.main.bounding_box, 0.5)
     points = get_point_cloud(limits, number_of_points)
@@ -207,7 +213,7 @@ def setup_plotting(number_of_points, grid):
 
 def calculate_scattered_field(points, exterior_indexer, domains, solution):
     """
-    todo
+    Return the value of the scattered field, calculated from the trace data.
     """
     exterior_points = points[:, exterior_indexer] # [:, :, 0]
     H_pot_ext = maxwell_potential.magnetic_field(
@@ -224,6 +230,10 @@ def calculate_scattered_field(points, exterior_indexer, domains, solution):
 
 
 def calculate_wall_field(solution, points, wall_indexer, domains, wall_dTrace, wall_nTrace):
+    """
+    Return the value of the field in the wall, calculated from the trace data.
+    """
+
     # wall
     wall_points = points[:, wall_indexer]
     H_pot_wall = maxwell_potential.magnetic_field(
@@ -260,6 +270,9 @@ def calculate_wall_field(solution, points, wall_indexer, domains, wall_dTrace, w
 
 
 def calculate_cavity_fields(solution, points, cavity_indexers, domains):
+    """
+    Return the value of a cavity's field, calculated from the trace data.
+    """
     # cavities
     E_pot_cavities = []
     H_pot_cavities = []
@@ -291,7 +304,8 @@ def calculate_cavity_fields(solution, points, cavity_indexers, domains):
   
 def show_domains(cavity_grid):
     """
-    todo
+    Show the domains, assigning constant values to them in order to illustrate
+    their arrangement.
     """
     number_of_points = 220
     points, cavity_indexers, wall_indexer, exterior_indexer, limits, shape = setup_plotting(number_of_points, cavity_grid)
@@ -309,7 +323,8 @@ def show_domains(cavity_grid):
 
 def get_indexers(points, grid):
     """
-    todo
+    Determine if a point is within the specified grid or not and
+    return the indexes of all points that are.
     """
     # check if the point is exterior to outer boundary
     exterior_indexer = get_indices(points, grid.main, -1)
@@ -325,50 +340,6 @@ def get_indexers(points, grid):
         mask[indexer] = 0
     wall_indexer = np.arange(len(points.T))[mask]
     return exterior_indexer, wall_indexer, cavity_indexers
-
-
-def get_spaces(shape, LENGTH_WALL, LENGTH_CAVITY):
-    """
-    todo
-    """
-    # Number of points in the x-direction
-    nx = shape[0] # 220# divide accordingly to achieve smaller particles
-
-    # Number of points in the y-direction
-    nz = shape[1] # 220
-
-    xmin, xmax, zmin, zmax = [
-        -LENGTH_WALL/2-1,
-        LENGTH_WALL/2+1,
-        -LENGTH_WALL/2-1,
-        LENGTH_WALL/2+1
-    ] 
-    # Ask Antigoni, why j's
-    plot_grid = np.mgrid[xmin:xmax:nx * 1j, 0:0:1j, zmin:zmax:nz * 1j]
-
-    c = 0 # Intersecting plane
-
-    points = np.vstack((
-        plot_grid[0].ravel(),
-        c * np.ones(plot_grid[0].size),
-        plot_grid[2].ravel()
-    ))
-
-    cavity_indexer = []
-    wall_indexer = []
-    exterior_indexer = []
-
-    for i, point in enumerate(points.T):
-        if point_is_within_cube(LENGTH_CAVITY, point):
-            cavity_indexer.append(i)
-        elif point_is_within_cube(LENGTH_WALL, point):
-            wall_indexer.append(i)
-        elif point_is_within_cube(np.inf, point):
-            exterior_indexer.append(i)
-        else:
-            raise ValueError("Point %s not within domain" % point)
-    
-    return points, (xmin, xmax, zmin, zmax), cavity_indexer, wall_indexer, exterior_indexer
 
 
 def point_is_within_cube(upper_bound_length, point):
@@ -395,16 +366,9 @@ def implot(limits, shape, data, clim=(0, 2)):
     fig.dpi = 100
 
 
-def get_field(points, selector, field):
-    total_field = np.empty_like(points, dtype='complex128')
-    total_field[:] = np.nan
-    total_field[:, selector] = field
-    return np.sum(np.abs(total_field**2), axis=0)
-
-
 def get_point_cloud(limits, number_of_points):
     """
-    todo
+    Return a span of points within the specified limits.
     """
     xmin, xmax, zmin, zmax = limits
     plot_grid = np.mgrid[
@@ -426,7 +390,7 @@ def get_point_cloud(limits, number_of_points):
     
 def get_limits(bounding_box, padding):
     """
-    todo
+    Get the limits of the space with which to fill with a point cloud.
 
     array([[-1.5, -1.5, -1.5],
             [ 1.5,  1.5,  1.5]])
@@ -440,7 +404,7 @@ def get_limits(bounding_box, padding):
 
 def get_indices(points, grid, direction=1):
     """
-    todo
+    Get indices of points that are within the grid.
     """
     box = grid.bounding_box
     if direction == -1:

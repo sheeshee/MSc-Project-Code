@@ -1,15 +1,24 @@
 """
-todo
+This file contains some constructor methods for objects with cavities.
+
+Import these functions to quickly try different number of cube
+cavities within the main boundary.
+
+>>> import bempp_cavity
+>>> import grids
+>>> grid = make_grid_4()
+>>> bempp_cavity.plotting.show_domains(grid)
 """
 from bempp.api import shapes
 
 import bempp_cavity
 
-ELEMENT_SIZE = 0.2
+ELEMENT_SIZE = 0.5
 
 def make_grid_1():
     """
-    todo
+    Returns a CavityGrid object of a solid with one cavity at the
+    center.
     """
     inner_walls = []
     inner_walls.append(
@@ -28,7 +37,8 @@ def make_grid_1():
 
 def make_grid_4():
     """
-    todo
+    Returns a CavityGrid object of a solid with four cavities within it
+    arranged in a square.
     """
     inner_walls = [
         shapes.cube(
@@ -58,7 +68,8 @@ def make_grid_4():
 
 def make_grid_9():
     """
-    todo
+    Returns a CavityGrid object of a solid with nine cavities within
+    arranged in a 3x3 grid.
     """
     cavity_length = 0.65
     inner_walls = [

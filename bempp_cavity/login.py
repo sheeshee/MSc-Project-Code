@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+"""
+The code in this file was written by Paul Escapil-Inchauspe
+Available at https://github.com/pescap/cald
+"""
+
 from __future__ import division
 import bempp.api
 import bempp.api as bem

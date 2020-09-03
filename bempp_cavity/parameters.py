@@ -1,13 +1,18 @@
 """
-todo
+This file contains a simple class that wraps the BEMPP parameters object
+simplifying its definition.
 """
 
 from bempp.core.common.global_parameters import global_parameters
 
 class Parameters:
+    """
+    A simple interface to BEMPP's parameters object.
+    Simplifies the definition of the parameters.
+    """
     def __init__(self, **kwargs):
         """
-        todo
+        Load the global parameters object and specify its attributes as necessary.
         """
         self.nearfield_cutoff = kwargs['nearfield_cutoff']
         self.ACA = kwargs['ACA']
@@ -32,4 +37,7 @@ class Parameters:
         self.params.quadrature.near.double_order = self.quadrature[0]
 
     def get(self):
+        """
+        Return the BEMPP parameters object.
+        """
         return self.params
